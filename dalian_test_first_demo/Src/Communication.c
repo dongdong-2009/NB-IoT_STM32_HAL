@@ -1,0 +1,245 @@
+/***************************************************************************//**
+ *   @file   Communication.c
+ *   @brief  Implementation of Communication Driver.
+ *   @author DBogdan (dragos.bogdan@analog.com)
+********************************************************************************
+ * Copyright 2012(c) Analog Devices, Inc.
+ *
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *  - Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *  - Neither the name of Analog Devices, Inc. nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *  - The use of this software may or may not infringe the patent rights
+ *    of one or more patent holders.  This license does not release you
+ *    from the requirement that you obtain separate licenses from these
+ *    patent holders to use this software.
+ *  - Use of the software either in source or binary form, must be run
+ *    on or directly connected to an Analog Devices Inc. component.
+ *
+ * THIS SOFTWARE IS PROVIDED BY ANALOG DEVICES "AS IS" AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, NON-INFRINGEMENT,
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL ANALOG DEVICES BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, INTELLECTUAL PROPERTY RIGHTS, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+********************************************************************************
+ *   SVN Revision: 798
+*******************************************************************************/
+
+/******************************************************************************/
+/* Include Files                                                              */
+/******************************************************************************/
+#include "stm32l4xx_hal.h"
+#include "Communication.h"
+
+#define MPU_SCL_H	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
+#define MPU_SCL_L	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+#define MPU_SDA_H	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_SET);
+#define MPU_SDA_L	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET);
+#define MPU_SDA_IN	(GPIOA->IDR&GPIO_PIN_10)
+/***************************************************************************//**
+ * @brief Initializes the I2C communication peripheral.
+ *
+ * @param clockFreq - I2C clock frequency (Hz).
+ *                    Example: 100000 - I2C clock frequency is 100 kHz.
+ * @return status - Result of the initialization procedure.
+ *                  Example: 1 - if initialization was successful;
+ *                           0 - if initialization was unsuccessful.
+*******************************************************************************/
+
+static int I2C_INIT_FLAG = 0;
+/* SCL=>PA9 SDA=>PA10 */
+void I2C_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStructure;
+
+    if(I2C_INIT_FLAG != 0)
+        return;
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    GPIO_InitStructure.Pin = GPIO_PIN_9 | GPIO_PIN_10;
+    GPIO_InitStructure.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStructure.Mode  = GPIO_MODE_OUTPUT_OD;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+    MPU_SDA_H;
+    MPU_SCL_H;
+    I2C_INIT_FLAG = 1;
+}
+
+/***************************************************************************//**
+ * @brief Writes data to a slave device.
+ *
+ * @param slaveAddress - Adress of the slave device.
+ * @param dataBuffer - Pointer to a buffer storing the transmission data.
+ * @param bytesNumber - Number of bytes to write.
+ * @param stopBit - Stop condition control.
+ *                  Example: 0 - A stop condition will not be sent;
+ *                           1 - A stop condition will be sent.
+ *
+ * @return status - Number of written bytes.
+*******************************************************************************/
+
+void MPU_Delay(void)
+{
+    uint32_t MPU_Step = 50;
+    while(MPU_Step--);
+}
+
+uint8_t MPU_Start(void)
+{
+    MPU_SDA_H;
+    MPU_SCL_H;
+    MPU_Delay();
+//	if(!MPU_SDA_IN) return 0;//SDA?????????,??
+    MPU_SDA_L;
+    MPU_Delay();
+    MPU_SCL_L;
+    return 1;
+}
+
+void MPU_Stop(void)
+{
+    MPU_SDA_L;
+    MPU_SCL_H;
+    MPU_Delay();
+    MPU_SDA_H;
+}
+
+void MPU_Ack(void)
+{
+    MPU_SDA_L;
+    MPU_Delay();
+    MPU_SCL_H;
+    MPU_Delay();
+    MPU_SCL_L;
+    MPU_Delay();
+}
+
+void MPU_NAck(void)
+{
+    MPU_SDA_H;
+    MPU_Delay();
+    MPU_SCL_H;
+    MPU_Delay();
+    MPU_SCL_L;
+    MPU_Delay();
+}
+
+uint8_t MPU_WaitAck(void)
+{
+    MPU_SDA_H;
+    MPU_Delay();
+    MPU_SCL_H;
+    MPU_Delay();
+    if(MPU_SDA_IN)
+    {
+        MPU_SCL_L;
+        return 0;
+    }
+    MPU_SCL_L;
+    return 1;
+}
+
+void MPU_SendByte(uint8_t SendByte)
+{
+    uint8_t i = 8;
+    while(i--)
+    {
+        MPU_SCL_L;
+        MPU_Delay();
+        if(SendByte & 0x80)
+        {
+            MPU_SDA_H;
+        }
+        else
+        {
+            MPU_SDA_L;
+        }
+        SendByte <<= 1;
+        MPU_Delay();
+        MPU_SCL_H;
+        MPU_Delay();
+    }
+    MPU_SCL_L;
+}
+
+uint8_t MPU_ReceiveByte(void)
+{
+    uint8_t i = 8;
+    uint8_t ReceiveByte = 0;
+
+    MPU_SDA_H;
+    while(i--)
+    {
+        ReceiveByte <<= 1;
+        MPU_SCL_L;
+        MPU_Delay();
+        MPU_SCL_H;
+        MPU_Delay();
+        if(MPU_SDA_IN)
+        {
+            ReceiveByte |= 0x01;
+        }
+    }
+    MPU_SCL_L;
+    return ReceiveByte;
+}
+
+uint8_t I2C_Write(uint8_t ADT7420_Adr, uint8_t register_adr, uint8_t val)
+{
+    MPU_Start();
+    MPU_SendByte(ADT7420_Adr);
+    MPU_Ack();
+    MPU_SendByte(register_adr);
+    MPU_Ack();
+    MPU_SendByte(val);
+    MPU_Ack();
+    MPU_Stop();
+
+    //delay_ms(10);
+    return 1;
+}
+
+/***************************************************************************//**
+ * @brief Reads data from a slave device.
+ *
+ * @param slaveAddress - Adress of the slave device.
+ * @param dataBuffer - Pointer to a buffer that will store the received data.
+ * @param bytesNumber - Number of bytes to read.
+ * @param stopBit - Stop condition control.
+ *                  Example: 0 - A stop condition will not be sent;
+ *                           1 - A stop condition will be sent.
+ *
+ * @return status - Number of read bytes.
+*******************************************************************************/
+uint8_t I2C_Read(uint8_t ADT7420_Adr, uint8_t register_adr)
+{
+    uint8_t temp = 0;
+    MPU_Start();
+    MPU_SendByte(ADT7420_Adr);
+    MPU_Ack();
+    MPU_SendByte(register_adr);
+    MPU_Ack();
+    MPU_Start();
+    MPU_SendByte(ADT7420_Adr | 0x01);
+    MPU_Ack();
+    temp = MPU_ReceiveByte();
+    MPU_NAck();
+    MPU_Stop();
+    return temp;
+}
+
